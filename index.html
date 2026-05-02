@@ -750,11 +750,38 @@
 
     <!-- UPLOAD -->
     <div class="section-title">📥 Upload Gambar</div>
-    <div class="upload-zone" id="upload-zone">
-      <input type="file" id="file-input" multiple accept=".jpg,.jpeg,.png,.jfif" onchange="handleFiles(this.files)">
-      <span class="upload-icon">🖼️</span>
-      <div class="upload-title">Drag & Drop Gambar AI Kamu</div>
-      <div class="upload-sub">atau klik untuk memilih file • JPG, JPEG, PNG, JFIF • Bisa pilih banyak sekaligus</div>
+
+    <!-- MODE SELECTOR -->
+    <div style="display:flex; gap:12px; margin-bottom:16px;">
+      <button class="provider-btn active" id="mode-btn-new" onclick="switchUploadMode('new')">
+        <span>🖼️ Gambar Baru</span>
+      </button>
+      <button class="provider-btn" id="mode-btn-pending" onclick="switchUploadMode('pending')">
+        <span>🔄 Lanjutkan dari Pending</span>
+      </button>
+    </div>
+
+    <!-- UPLOAD ZONE: GAMBAR BARU -->
+    <div id="upload-zone-new">
+      <div class="upload-zone" id="upload-zone">
+        <input type="file" id="file-input" multiple accept=".jpg,.jpeg,.png,.jfif" onchange="handleFiles(this.files)">
+        <span class="upload-icon">🖼️</span>
+        <div class="upload-title">Drag & Drop Gambar AI Kamu</div>
+        <div class="upload-sub">atau klik untuk memilih file • JPG, JPEG, PNG, JFIF • Bisa pilih banyak sekaligus</div>
+      </div>
+    </div>
+
+    <!-- UPLOAD ZONE: PENDING ZIP -->
+    <div id="upload-zone-pending" style="display:none;">
+      <div class="alert alert-info" style="margin-bottom:12px;">
+        ℹ️ Upload file <strong>stockforge_pending.zip</strong> — Fase 1 akan dilewati, langsung ke Fase 2 (Generate Metadata).
+      </div>
+      <div class="upload-zone" id="upload-zone-zip" onclick="document.getElementById('pending-zip-input').click()">
+        <input type="file" id="pending-zip-input" accept=".zip" style="display:none;" onchange="handlePendingZip(this.files)">
+        <span class="upload-icon">📦</span>
+        <div class="upload-title">Klik untuk Upload ZIP Pending</div>
+        <div class="upload-sub">Pilih file stockforge_pending.zip • Langsung Fase 2 saja</div>
+      </div>
     </div>
 
     <!-- IMAGE GRID -->
@@ -907,8 +934,10 @@ let settings = {
 let files = [];
 let processedImages = []; // {filename, blob, metadata} — berhasil semua
 let pendingImages = [];   // {filename, blob} — Fase 1 selesai, metadata belum
+let pendingBlobs = [];    // {filename, blob} — loaded dari ZIP pending untuk Fase 2 saja
 let isProcessing = false;
 let stopRequested = false;
+let isPendingMode = false; // true = skip Fase 1, langsung Fase 2
 
 const CATEGORY_MAP = {
   1: 'Animals',
@@ -1263,6 +1292,129 @@ function setupDragDrop() {
 }
 
 // =============================================
+// UPLOAD MODE SWITCHER
+// =============================================
+function switchUploadMode(mode) {
+  isPendingMode = mode === 'pending';
+
+  // Update mode buttons
+  document.getElementById('mode-btn-new').classList.toggle('active', !isPendingMode);
+  document.getElementById('mode-btn-pending').classList.toggle('active', isPendingMode);
+
+  // Show/hide upload zones
+  document.getElementById('upload-zone-new').style.display = isPendingMode ? 'none' : 'block';
+  document.getElementById('upload-zone-pending').style.display = isPendingMode ? 'block' : 'none';
+
+  // Clear existing files when switching mode
+  clearAll();
+}
+
+// =============================================
+// HANDLE PENDING ZIP
+// =============================================
+async function handlePendingZip(fileList) {
+  if (!fileList || fileList.length === 0) return;
+  const zipFile = fileList[0];
+  if (!zipFile.name.endsWith('.zip')) {
+    showAlert('Hanya file .zip yang diterima!', 'error');
+    return;
+  }
+
+  showAlert('Membaca ZIP...', 'info');
+
+  try {
+    const zip = new JSZip();
+    const loaded = await zip.loadAsync(zipFile);
+
+    pendingBlobs = [];
+    const imageExts = ['.jpg', '.jpeg', '.png', '.jfif'];
+
+    // Extract all image files from ZIP
+    const extractPromises = [];
+    loaded.forEach((relativePath, zipEntry) => {
+      if (zipEntry.dir) return;
+      const name = relativePath.split('/').pop(); // strip folder prefix
+      const ext = '.' + name.split('.').pop().toLowerCase();
+      if (!imageExts.includes(ext)) return;
+
+      const p = zipEntry.async('blob').then(blob => {
+        // Convert to jpg blob type
+        const jpgBlob = new Blob([blob], { type: 'image/jpeg' });
+        pendingBlobs.push({ filename: name.replace(/\.[^.]+$/, '.jpg'), blob: jpgBlob });
+      });
+      extractPromises.push(p);
+    });
+
+    await Promise.all(extractPromises);
+
+    if (pendingBlobs.length === 0) {
+      showAlert('Tidak ada gambar ditemukan dalam ZIP!', 'error');
+      return;
+    }
+
+    // Sort by filename for consistent order
+    pendingBlobs.sort((a, b) => a.filename.localeCompare(b.filename));
+
+    // Update stats and show preview
+    document.getElementById('stat-total').textContent = pendingBlobs.length;
+    document.getElementById('stat-done').textContent = '0';
+    document.getElementById('stat-error').textContent = '0';
+    document.getElementById('stat-pending').textContent = pendingBlobs.length;
+
+    // Show pending preview grid
+    renderPendingGrid();
+
+    document.getElementById('process-controls').style.display = 'flex';
+    document.getElementById('btn-start').textContent = '🚀 Mulai Fase 2 (Metadata)';
+
+    showAlert(`✅ ${pendingBlobs.length} gambar siap dilanjutkan ke Fase 2`, 'success');
+
+  } catch(e) {
+    showAlert('❌ Gagal membaca ZIP: ' + e.message, 'error');
+  }
+}
+
+function renderPendingGrid() {
+  const grid = document.getElementById('image-grid');
+  grid.querySelectorAll('img').forEach(img => {
+    if (img.src && img.src.startsWith('blob:')) URL.revokeObjectURL(img.src);
+  });
+  grid.classList.remove('hidden');
+  grid.innerHTML = '';
+
+  pendingBlobs.forEach((item, idx) => {
+    const url = URL.createObjectURL(item.blob);
+    const card = document.createElement('div');
+    card.className = 'image-card';
+    card.id = `img-card-${idx}`;
+
+    const img = document.createElement('img');
+    img.src = url;
+    img.alt = item.filename;
+    img.style.cssText = 'width:100%;aspect-ratio:1;object-fit:cover;display:block;';
+
+    const info = document.createElement('div');
+    info.className = 'image-card-info';
+
+    const nameDiv = document.createElement('div');
+    nameDiv.className = 'image-card-name';
+    nameDiv.title = item.filename;
+    nameDiv.textContent = item.filename;
+
+    const statusDiv = document.createElement('div');
+    statusDiv.className = 'image-card-status status-pending';
+    statusDiv.id = `img-status-${idx}`;
+    statusDiv.textContent = '⏳ Menunggu metadata';
+
+    info.appendChild(nameDiv);
+    info.appendChild(statusDiv);
+    card.appendChild(img);
+    card.appendChild(info);
+    grid.appendChild(card);
+  });
+}
+
+// =============================================
 // FILE HANDLING
 // =============================================
 function handleFiles(fileList) {
@@ -1342,11 +1494,15 @@ function clearAll() {
   files = [];
   processedImages = [];
   pendingImages = [];
+  pendingBlobs = [];
   document.getElementById('image-grid').innerHTML = '';
   document.getElementById('image-grid').classList.add('hidden');
   document.getElementById('process-controls').style.display = 'none';
   document.getElementById('progress-section').classList.add('hidden');
   document.getElementById('file-input').value = '';
+  const pzi = document.getElementById('pending-zip-input');
+  if (pzi) pzi.value = '';
+  document.getElementById('btn-start').textContent = isPendingMode ? '🚀 Mulai Fase 2 (Metadata)' : '🚀 Mulai Proses';
   document.getElementById('stat-error').textContent = '0';
   document.getElementById('output-empty').classList.remove('hidden');
   document.getElementById('output-ready').classList.add('hidden');
@@ -1528,7 +1684,13 @@ function playDoneSound() {
 // PROCESSING PIPELINE
 // =============================================
 async function startProcessing() {
-  // Validate
+  // Route to pending mode if applicable
+  if (isPendingMode) {
+    await startProcessingPending();
+    return;
+  }
+
+  // Validate normal mode
   if (files.length === 0) { showAlert('Upload gambar terlebih dahulu!', 'error'); return; }
   const useOR = settings.providers.openrouter;
   const useGemini = settings.providers.gemini;
@@ -1752,6 +1914,106 @@ async function startProcessing() {
   }
 }
 
+// =============================================
+// PENDING MODE — Langsung Fase 2 saja
+// =============================================
+async function startProcessingPending() {
+  if (pendingBlobs.length === 0) { showAlert('Upload ZIP pending terlebih dahulu!', 'error'); return; }
+
+  const useOR = settings.providers.openrouter;
+  const useGemini = settings.providers.gemini;
+  if (!useOR && !useGemini) { showAlert('Aktifkan minimal 1 provider di Settings!', 'error'); return; }
+
+  isProcessing = true;
+  stopRequested = false;
+  processedImages = [];
+  pendingImages = [];
+
+  await requestWakeLock();
+
+  document.getElementById('btn-start').disabled = true;
+  document.getElementById('btn-clear').disabled = true;
+  document.getElementById('btn-stop').classList.remove('hidden');
+  document.getElementById('progress-section').classList.remove('hidden');
+  document.getElementById('output-empty').classList.remove('hidden');
+  document.getElementById('output-ready').classList.add('hidden');
+
+  clearLog();
+  addLog('info', `Mode Pending — Langsung Fase 2: ${pendingBlobs.length} gambar`);
+  addLog('info', `Skip Fase 1 (gambar sudah di-enhance sebelumnya)`);
+
+  let doneCount = 0;
+  let errorCount = 0;
+
+  addLog('info', `\n── FASE 2: Generate Metadata (${pendingBlobs.length} gambar) ──`);
+
+  for (let i = 0; i < pendingBlobs.length; i++) {
+    if (stopRequested) {
+      addLog('warn', 'Proses dihentikan oleh pengguna.');
+      // Sisa gambar masuk pending lagi
+      for (let j = i; j < pendingBlobs.length; j++) {
+        pendingImages.push({ filename: pendingBlobs[j].filename, blob: pendingBlobs[j].blob });
+      }
+      break;
+    }
+
+    const item = pendingBlobs[i];
+    addLog('info', `[${i+1}/${pendingBlobs.length}] Metadata: ${item.filename}`);
+    document.getElementById('current-filename').textContent = `Fase 2 — [${i+1}/${pendingBlobs.length}] ${item.filename}`;
+    setImageStatus(i, 'processing', '⚙️ Generate metadata...');
+    resetSteps();
+    setStep('meta', 'active');
+
+    try {
+      const metadata = await generateMetadata(item.blob, item.filename);
+      setStep('meta', 'done');
+      addLog('success', `  ✅ Title: "${metadata.title.substring(0,50)}..."`);
+      addLog('success', `  Category: ${metadata.category} (${CATEGORY_MAP[metadata.category] || ''})`);
+
+      processedImages.push({ filename: item.filename, blob: item.blob, metadata });
+      setImageStatus(i, 'done', '✅ Selesai');
+      doneCount++;
+
+    } catch(err) {
+      setStep('meta', 'error');
+      setImageStatus(i, 'error', '❌ Gagal');
+      addLog('error', `  ❌ ${err.message}`);
+      pendingImages.push({ filename: item.filename, blob: item.blob });
+      errorCount++;
+    }
+
+    // Progress 0–100%
+    const pct = Math.round(((i+1) / pendingBlobs.length) * 100);
+    document.getElementById('progress-fill').style.width = pct + '%';
+    document.getElementById('progress-pct').textContent = pct + '%';
+    document.getElementById('progress-text').textContent = `Fase 2: ${i+1}/${pendingBlobs.length} metadata`;
+    document.getElementById('stat-done').textContent = doneCount;
+    document.getElementById('stat-error').textContent = errorCount;
+    document.getElementById('stat-pending').textContent = Math.max(0, pendingBlobs.length - (i+1));
+  }
+
+  // Selesai
+  isProcessing = false;
+  await releaseWakeLock();
+  document.getElementById('btn-start').disabled = false;
+  document.getElementById('btn-clear').disabled = false;
+  document.getElementById('btn-stop').classList.add('hidden');
+  document.getElementById('btn-start').textContent = '🚀 Mulai Fase 2 (Metadata)';
+
+  addLog('success', `\n✅ Selesai! ${doneCount} berhasil, ${errorCount} gagal.`);
+  if (pendingImages.length > 0) addLog('warn', `📥 ${pendingImages.length} gambar masuk ZIP pending.`);
+
+  if (processedImages.length > 0 || pendingImages.length > 0) {
+    playDoneSound();
+    showOutputTab();
+    showAlert(`✅ Selesai! ${doneCount} berhasil, ${pendingImages.length} pending`, 'success');
+    const outputTabBtn = document.querySelectorAll('.tab')[2];
+    if (outputTabBtn) switchTab('output', outputTabBtn);
+  } else {
+    playDoneSound();
+    showAlert('⚠️ Semua gagal. Cek log untuk detail.', 'error');
+  }
+}
 function stopProcessing() {
   stopRequested = true;
   addLog('warn', 'Menghentikan proses...');
