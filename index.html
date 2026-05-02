@@ -729,15 +729,19 @@
 
     <div id="output-ready" class="hidden">
 
-      <div class="alert alert-success">
+      <div class="alert alert-success" id="output-alert-success">
         ✅ Semua gambar berhasil diproses! Silakan download hasil di bawah ini.
       </div>
 
-      <div class="output-grid">
+      <div class="alert alert-warning hidden" id="output-alert-partial">
+        ⚠️ Proses dihentikan. Download gambar yang belum selesai untuk dilanjutkan besok.
+      </div>
+
+      <div class="output-grid" id="output-grid-main">
         <div class="output-card">
           <span class="output-icon">📦</span>
           <div class="output-title">Download ZIP</div>
-          <div class="output-desc">Semua gambar hasil proses (resize + upscale + enhancement) dalam 1 file ZIP</div>
+          <div class="output-desc">Semua gambar yang berhasil diproses lengkap (resize + upscale + enhancement + metadata)</div>
           <button class="btn btn-accent btn-large" id="btn-download-zip" onclick="downloadZip()">⬇️ Download ZIP</button>
         </div>
         <div class="output-card">
@@ -745,6 +749,17 @@
           <div class="output-title">Download CSV</div>
           <div class="output-desc">Metadata siap upload ke Adobe Stock (Filename, Title, Keywords, Category, Releases)</div>
           <button class="btn btn-success btn-large" id="btn-download-csv" onclick="downloadCsv()">⬇️ Download CSV</button>
+        </div>
+      </div>
+
+      <!-- ZIP PENDING — hanya muncul jika ada gambar yang belum selesai metadata -->
+      <div id="output-pending-section" class="hidden" style="margin-top:20px;">
+        <div class="section-title">📥 Gambar Belum Selesai</div>
+        <div class="output-card" style="text-align:center;">
+          <span class="output-icon">🔄</span>
+          <div class="output-title">Download ZIP — Lanjutkan Besok</div>
+          <div class="output-desc" id="output-pending-desc">Gambar yang sudah di-enhance tapi metadata belum berhasil. Upload file ini besok untuk melanjutkan dari Fase 2 saja.</div>
+          <button class="btn btn-outline btn-large" id="btn-download-pending" onclick="downloadPendingZip()">⬇️ Download ZIP Pending</button>
         </div>
       </div>
 
@@ -790,7 +805,8 @@ let settings = {
 };
 
 let files = [];
-let processedImages = []; // {filename, blob, metadata}
+let processedImages = []; // {filename, blob, metadata} — berhasil semua
+let pendingImages = [];   // {filename, blob} — Fase 1 selesai, metadata belum
 let isProcessing = false;
 let stopRequested = false;
 
@@ -1094,6 +1110,7 @@ function clearAll() {
   });
   files = [];
   processedImages = [];
+  pendingImages = [];
   document.getElementById('image-grid').innerHTML = '';
   document.getElementById('image-grid').classList.add('hidden');
   document.getElementById('process-controls').style.display = 'none';
@@ -1288,6 +1305,7 @@ async function startProcessing() {
   isProcessing = true;
   stopRequested = false;
   processedImages = [];
+  pendingImages = [];
 
   // Activate Wake Lock to prevent tab throttling
   await requestWakeLock();
@@ -1410,7 +1428,14 @@ async function startProcessing() {
   let fase2Error = 0;
 
   for (let i = 0; i < validVisual.length; i++) {
-    if (stopRequested) { addLog('warn', 'Proses dihentikan oleh pengguna.'); break; }
+    if (stopRequested) {
+      addLog('warn', 'Proses dihentikan oleh pengguna.');
+      // Semua gambar yang belum diproses metadata → masuk pending
+      for (let j = i; j < validVisual.length; j++) {
+        pendingImages.push({ filename: validVisual[j].filename, blob: validVisual[j].blob });
+      }
+      break;
+    }
 
     const item = validVisual[i];
     addLog('info', `[${i+1}/${validVisual.length}] Metadata: ${item.filename}`);
@@ -1440,6 +1465,8 @@ async function startProcessing() {
       setStep('meta', 'error');
       setImageStatus(item.idx, 'error', '❌ Meta gagal');
       addLog('error', `  ❌ Metadata gagal: ${err.message}`);
+      // Gambar gagal metadata → masuk pending untuk dilanjutkan
+      pendingImages.push({ filename: item.filename, blob: item.blob });
       fase2Error++;
     }
 
@@ -1464,12 +1491,15 @@ async function startProcessing() {
 
   const totalDone = fase2Done;
   const totalError = fase1Error + fase2Error;
-  addLog('success', `\n✅ Semua selesai! ${totalDone} berhasil, ${totalError} gagal.`);
+  addLog('success', `\n✅ Selesai! ${totalDone} berhasil, ${totalError} gagal.`);
+  if (pendingImages.length > 0) {
+    addLog('warn', `📥 ${pendingImages.length} gambar masuk ZIP pending — download untuk dilanjutkan.`);
+  }
 
-  if (processedImages.length > 0) {
+  if (processedImages.length > 0 || pendingImages.length > 0) {
     playDoneSound();
     showOutputTab();
-    showAlert(`✅ Selesai! ${totalDone} gambar siap didownload`, 'success');
+    showAlert(`✅ Selesai! ${totalDone} berhasil, ${pendingImages.length} pending`, 'success');
     const outputTabBtn = document.querySelectorAll('.tab')[2];
     if (outputTabBtn) switchTab('output', outputTabBtn);
   } else {
@@ -1973,7 +2003,51 @@ function clearLog() {
 function showOutputTab() {
   document.getElementById('output-empty').classList.add('hidden');
   document.getElementById('output-ready').classList.remove('hidden');
+
+  // Show correct alert
+  if (pendingImages.length > 0) {
+    document.getElementById('output-alert-success').classList.add('hidden');
+    document.getElementById('output-alert-partial').classList.remove('hidden');
+  } else {
+    document.getElementById('output-alert-success').classList.remove('hidden');
+    document.getElementById('output-alert-partial').classList.add('hidden');
+  }
+
+  // Show/hide main download section
+  if (processedImages.length > 0) {
+    document.getElementById('output-grid-main').classList.remove('hidden');
+  } else {
+    document.getElementById('output-grid-main').classList.add('hidden');
+  }
+
+  // Show/hide pending ZIP section
+  if (pendingImages.length > 0) {
+    const pendingSection = document.getElementById('output-pending-section');
+    pendingSection.classList.remove('hidden');
+    const desc = document.getElementById('output-pending-desc');
+    desc.textContent = `${pendingImages.length} gambar sudah di-enhance tapi metadata belum berhasil. Upload file ini besok untuk melanjutkan dari Fase 2 saja.`;
+  } else {
+    document.getElementById('output-pending-section').classList.add('hidden');
+  }
+
   renderResultsTable();
+}
+
+async function downloadPendingZip() {
+  if (pendingImages.length === 0) return;
+  showAlert('Membuat ZIP pending...', 'info');
+  try {
+    const zip = new JSZip();
+    const folder = zip.folder('stockforge_pending');
+    pendingImages.forEach(item => {
+      folder.file(item.filename, item.blob);
+    });
+    const zipBlob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+    downloadBlob(zipBlob, 'stockforge_pending.zip');
+    showAlert(`✅ ZIP pending (${pendingImages.length} gambar) berhasil didownload!`, 'success');
+  } catch(e) {
+    showAlert('❌ Gagal membuat ZIP pending: ' + e.message, 'error');
+  }
 }
 
 function renderResultsTable() {
