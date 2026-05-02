@@ -1648,10 +1648,10 @@ async function enhanceImage(blob) {
 // =============================================
 // STEP 4: METADATA GENERATOR
 // Race: semua model dipanggil bersamaan per API key
-// Model tercepat yang menang, sisanya di-cancel
+// Auto retry dengan exponential backoff jika rate limit
 // =============================================
 async function generateMetadata(blob, filename) {
-  const base64 = await blobToBase64Compressed(blob, 1024);
+  const base64 = await blobToBase64Compressed(blob, 1536);
 
   const prompt = `You are an Adobe Stock metadata expert. Analyze this image carefully and generate metadata.
 
@@ -1674,53 +1674,105 @@ Rules:
   const validKeys = settings.apiKeys.filter(k => k.trim());
   const validModels = settings.models.filter(m => m.trim());
 
-  let lastError = null;
+  // Retry delays: 15s, 30s, 60s, 90s, 120s
+  const RETRY_DELAYS = [15000, 30000, 60000, 90000, 120000];
+  const MAX_RETRIES = RETRY_DELAYS.length;
 
-  // Try each API key one by one
-  for (const apiKey of validKeys) {
+  let attempt = 0;
+
+  while (attempt <= MAX_RETRIES) {
     if (stopRequested) throw new Error('Dihentikan oleh pengguna');
 
-    // Race: panggil semua model bersamaan, tercepat yang menang
-    const controllers = validModels.map(() => new AbortController());
+    let lastError = null;
+    let allRateLimited = true; // track if ALL failures are rate limit
 
-    const modelRaces = validModels.map((model, idx) =>
-      callOpenRouter(apiKey.trim(), model.trim(), prompt, base64, controllers[idx].signal)
-        .then(result => ({ result, model }))
-    );
+    // Try each API key one by one
+    for (const apiKey of validKeys) {
+      if (stopRequested) throw new Error('Dihentikan oleh pengguna');
 
-    addLog('info', `  Race ${validModels.length} model bersamaan (Key #${validKeys.indexOf(apiKey)+1})...`);
+      // Race: panggil semua model bersamaan, tercepat yang menang
+      const controllers = validModels.map(() => new AbortController());
+      const keyIdx = validKeys.indexOf(apiKey) + 1;
 
-    try {
-      // Promise.any — ambil yang pertama berhasil, abaikan yang gagal
-      const winner = await Promise.any(modelRaces);
+      const modelRaces = validModels.map((model, idx) =>
+        callOpenRouter(apiKey.trim(), model.trim(), prompt, base64, controllers[idx].signal)
+          .then(result => ({ result, model }))
+      );
 
-      // Cancel semua model lain yang masih berjalan
-      controllers.forEach((ctrl, idx) => {
-        if (validModels[idx] !== winner.model) {
-          try { ctrl.abort(); } catch(e) {}
-        }
-      });
-
-      addLog('success', `  ✓ Menang: ${winner.model.split('/').pop()}`);
-      return winner.result;
-
-    } catch(err) {
-      // Promise.any throws AggregateError if ALL models fail
-      // Extract last error message
-      if (err.errors && err.errors.length > 0) {
-        lastError = err.errors[err.errors.length - 1];
-        addLog('warn', `  ✗ Semua model gagal di Key #${validKeys.indexOf(apiKey)+1}: ${lastError.message}`);
+      if (attempt === 0) {
+        addLog('info', `  Race ${validModels.length} model (Key #${keyIdx})...`);
       } else {
-        lastError = err;
-        addLog('warn', `  ✗ Key #${validKeys.indexOf(apiKey)+1} gagal: ${err.message}`);
+        addLog('info', `  Retry ke-${attempt}: Race ${validModels.length} model (Key #${keyIdx})...`);
       }
-      // Cancel all controllers for this key before trying next key
-      controllers.forEach(ctrl => { try { ctrl.abort(); } catch(e) {} });
-      await sleep(300);
+
+      try {
+        const winner = await Promise.any(modelRaces);
+
+        // Cancel semua model lain yang masih berjalan
+        controllers.forEach((ctrl, idx) => {
+          if (validModels[idx] !== winner.model) {
+            try { ctrl.abort(); } catch(e) {}
+          }
+        });
+
+        addLog('success', `  ✓ Menang: ${winner.model.split('/').pop()}`);
+        return winner.result;
+
+      } catch(err) {
+        // Cancel all for this key
+        controllers.forEach(ctrl => { try { ctrl.abort(); } catch(e) {} });
+
+        // Extract error from AggregateError
+        let errMsg = err.message;
+        if (err.errors && err.errors.length > 0) {
+          errMsg = err.errors[err.errors.length - 1].message || errMsg;
+        }
+
+        lastError = new Error(errMsg);
+
+        // Check if this is a rate limit error
+        const isRateLimit = errMsg.toLowerCase().includes('rate limit') ||
+                           errMsg.toLowerCase().includes('too many') ||
+                           errMsg.toLowerCase().includes('429');
+
+        if (!isRateLimit) allRateLimited = false;
+
+        addLog('warn', `  ✗ Key #${keyIdx} gagal: ${errMsg}`);
+        await sleep(300);
+      }
+    }
+
+    // All keys failed — decide whether to retry or give up
+    if (attempt < MAX_RETRIES) {
+      const delay = RETRY_DELAYS[attempt];
+      const delaySec = delay / 1000;
+
+      if (allRateLimited) {
+        addLog('warn', `  ⏳ Rate limit — tunggu ${delaySec} detik lalu retry otomatis...`);
+      } else {
+        addLog('warn', `  ⏳ Semua gagal — tunggu ${delaySec} detik lalu retry...`);
+      }
+
+      // Countdown log every 15 seconds
+      let waited = 0;
+      while (waited < delay) {
+        if (stopRequested) throw new Error('Dihentikan oleh pengguna');
+        const waitChunk = Math.min(15000, delay - waited);
+        await sleep(waitChunk);
+        waited += waitChunk;
+        if (waited < delay) {
+          addLog('info', `  ⏳ Sisa tunggu: ${Math.round((delay - waited) / 1000)} detik...`);
+        }
+      }
+
+      attempt++;
+    } else {
+      // Exceeded max retries
+      throw new Error(`Gagal setelah ${MAX_RETRIES} retry. Error terakhir: ${lastError ? lastError.message : 'Unknown'}`);
     }
   }
 
-  throw new Error(`Semua API key & model gagal. Error terakhir: ${lastError ? lastError.message : 'Tidak ada API key atau model yang valid'}`);
+  throw new Error('Gagal generate metadata');
 }
 
 async function callOpenRouter(apiKey, model, prompt, base64, externalSignal) {
@@ -1844,8 +1896,9 @@ async function blobToBase64Compressed(blob, maxSize) {
         canvas.height = h;
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, w, h);
+        // Revoke AFTER drawing is complete
+        const base64 = canvas.toDataURL('image/jpeg', 0.90).split(',')[1];
         URL.revokeObjectURL(url);
-        const base64 = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
         if (!base64) reject(new Error('Failed to convert image to base64'));
         else resolve(base64);
       } catch(e) { URL.revokeObjectURL(url); reject(e); }
