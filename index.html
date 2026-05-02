@@ -575,6 +575,56 @@
   }
 
   .results-table tr:hover td { background: var(--surface2); }
+
+  /* PROVIDER TOGGLE */
+  .provider-toggle {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+
+  .provider-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 20px;
+    border-radius: 10px;
+    border: 2px solid var(--border);
+    background: transparent;
+    color: var(--text2);
+    font-family: 'DM Mono', monospace;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s;
+    flex: 1;
+    justify-content: center;
+  }
+
+  .provider-btn.active {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(255,107,53,0.08);
+  }
+
+  .provider-btn:hover:not(.active) {
+    border-color: var(--text2);
+    color: var(--text);
+  }
+
+  .provider-check {
+    width: 18px;
+    height: 18px;
+    border-radius: 4px;
+    border: 2px solid currentColor;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    flex-shrink: 0;
+  }
+
+  .provider-section { display: none; }
+  .provider-section.visible { display: block; }
 </style>
 </head>
 <body>
@@ -595,26 +645,67 @@
   <!-- ===== TAB: SETTINGS ===== -->
   <div id="tab-settings" class="tab-content active">
 
-    <!-- API KEYS -->
-    <div class="section-title">🔑 OpenRouter API Keys</div>
+    <!-- PROVIDER TOGGLE -->
+    <div class="section-title">🌐 Provider API</div>
     <div class="card">
-      <div class="alert alert-info">
-        ℹ️ API Keys tersimpan di browser kamu (localStorage). Tidak dikirim ke server manapun selain OpenRouter.
+      <p style="font-size:13px; color:var(--text2); margin-bottom:16px;">Pilih provider yang ingin digunakan. Bisa pilih salah satu atau keduanya sekaligus.</p>
+      <div class="provider-toggle">
+        <button class="provider-btn" id="provider-btn-openrouter" onclick="toggleProvider('openrouter')">
+          <span class="provider-check" id="provider-check-openrouter"></span>
+          <span>OpenRouter</span>
+        </button>
+        <button class="provider-btn" id="provider-btn-gemini" onclick="toggleProvider('gemini')">
+          <span class="provider-check" id="provider-check-gemini"></span>
+          <span>Gemini (Google AI Studio)</span>
+        </button>
       </div>
-      <div id="api-keys-list"></div>
-      <button class="btn btn-outline mt-10" onclick="addApiKey()">+ Tambah API Key</button>
     </div>
 
-    <!-- MODELS -->
-    <div class="section-title">🤖 Models (Urutan = Prioritas Fallback)</div>
-    <div class="card">
-      <div class="alert alert-warning">
-        ⚠️ Pastikan model yang digunakan mendukung Vision (melihat gambar). Jika model gagal, otomatis lanjut ke model berikutnya.
+    <!-- OPENROUTER SECTION -->
+    <div id="section-openrouter" class="provider-section">
+      <div class="section-title">🔑 OpenRouter — API Keys</div>
+      <div class="card">
+        <div class="alert alert-info">
+          ℹ️ API Keys tersimpan di browser kamu (localStorage). Tidak dikirim ke server manapun selain OpenRouter.
+        </div>
+        <div id="api-keys-list"></div>
+        <button class="btn btn-outline mt-10" onclick="addApiKey()">+ Tambah API Key</button>
       </div>
-      <div id="models-list"></div>
-      <div class="flex gap-10 mt-10">
-        <button class="btn btn-outline" onclick="addModel()">+ Tambah Model</button>
-        <button class="btn btn-outline" onclick="addDefaultModels()">↺ Reset Default Models</button>
+
+      <div class="section-title">🤖 OpenRouter — Models</div>
+      <div class="card">
+        <div class="alert alert-warning">
+          ⚠️ Pastikan model mendukung Vision. Semua model dipanggil bersamaan (race), tercepat yang menang.
+        </div>
+        <div id="models-list"></div>
+        <div class="flex gap-10 mt-10">
+          <button class="btn btn-outline" onclick="addModel()">+ Tambah Model</button>
+          <button class="btn btn-outline" onclick="addDefaultModels()">↺ Reset Default</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- GEMINI SECTION -->
+    <div id="section-gemini" class="provider-section">
+      <div class="section-title">🔑 Gemini — API Keys (Google AI Studio)</div>
+      <div class="card">
+        <div class="alert alert-info">
+          ℹ️ Dapatkan API key di <strong>aistudio.google.com</strong>. Key dimulai dengan <strong>AIza...</strong>
+        </div>
+        <div id="gemini-keys-list"></div>
+        <button class="btn btn-outline mt-10" onclick="addGeminiKey()">+ Tambah Gemini API Key</button>
+      </div>
+
+      <div class="section-title">🤖 Gemini — Models</div>
+      <div class="card">
+        <div class="alert alert-warning">
+          ⚠️ Gunakan model yang mendukung Vision. Semua model dipanggil bersamaan (race).
+        </div>
+        <div id="gemini-models-list"></div>
+        <div class="flex gap-10 mt-10">
+          <button class="btn btn-outline" onclick="addGeminiModel()">+ Tambah Model</button>
+          <button class="btn btn-outline" onclick="addDefaultGeminiModels()">↺ Reset Default</button>
+        </div>
       </div>
     </div>
 
@@ -798,9 +889,18 @@ const DEFAULT_MODELS = [
   'qwen/qwen2.5-vl-72b-instruct:free'
 ];
 
+const DEFAULT_GEMINI_MODELS = [
+  'gemini-2.0-flash',
+  'gemini-1.5-flash',
+  'gemini-1.5-pro'
+];
+
 let settings = {
   apiKeys: [],
   models: [],
+  geminiKeys: [],
+  geminiModels: [],
+  providers: { openrouter: true, gemini: false },
   upscale: 4
 };
 
@@ -839,8 +939,11 @@ const CATEGORY_MAP = {
 // =============================================
 function init() {
   loadSettings();
+  renderProviderToggle();
   renderApiKeys();
   renderModels();
+  renderGeminiKeys();
+  renderGeminiModels();
   renderUpscale();
   setupDragDrop();
 }
@@ -852,17 +955,26 @@ function loadSettings() {
       const parsed = JSON.parse(saved);
       settings.apiKeys = Array.isArray(parsed.apiKeys) ? parsed.apiKeys : [];
       settings.models = Array.isArray(parsed.models) ? parsed.models : [];
+      settings.geminiKeys = Array.isArray(parsed.geminiKeys) ? parsed.geminiKeys : [];
+      settings.geminiModels = Array.isArray(parsed.geminiModels) ? parsed.geminiModels : [];
       settings.upscale = [2,4,8].includes(parsed.upscale) ? parsed.upscale : 4;
+      settings.providers = {
+        openrouter: parsed.providers?.openrouter !== false,
+        gemini: parsed.providers?.gemini === true
+      };
     } else {
-      settings.models = [
-        'google/gemini-2.0-flash-exp:free',
-        'meta-llama/llama-4-scout:free',
-        'qwen/qwen2.5-vl-72b-instruct:free'
-      ];
+      settings.models = [...DEFAULT_MODELS];
+      settings.geminiModels = [...DEFAULT_GEMINI_MODELS];
+      settings.providers = { openrouter: true, gemini: false };
     }
   } catch(e) {
     console.error('Load settings error:', e);
-    settings = { apiKeys: [], models: DEFAULT_MODELS, upscale: 4 };
+    settings = {
+      apiKeys: [], models: [...DEFAULT_MODELS],
+      geminiKeys: [], geminiModels: [...DEFAULT_GEMINI_MODELS],
+      providers: { openrouter: true, gemini: false },
+      upscale: 4
+    };
   }
 }
 
@@ -998,6 +1110,125 @@ function removeModel(idx) {
 function addDefaultModels() {
   settings.models = [...DEFAULT_MODELS];
   renderModels();
+}
+
+// =============================================
+// PROVIDER TOGGLE
+// =============================================
+function renderProviderToggle() {
+  ['openrouter', 'gemini'].forEach(p => {
+    const btn = document.getElementById('provider-btn-' + p);
+    const check = document.getElementById('provider-check-' + p);
+    const section = document.getElementById('section-' + p);
+    const active = settings.providers[p];
+    if (btn) btn.classList.toggle('active', active);
+    if (check) check.textContent = active ? '✓' : '';
+    if (section) section.classList.toggle('visible', active);
+  });
+}
+
+function toggleProvider(p) {
+  settings.providers[p] = !settings.providers[p];
+  // At least one must be active
+  if (!settings.providers.openrouter && !settings.providers.gemini) {
+    settings.providers[p] = true;
+    showAlert('Minimal 1 provider harus aktif!', 'error');
+    return;
+  }
+  renderProviderToggle();
+}
+
+// =============================================
+// GEMINI KEYS
+// =============================================
+function renderGeminiKeys() {
+  const container = document.getElementById('gemini-keys-list');
+  if (!container) return;
+  container.innerHTML = '';
+  if (settings.geminiKeys.length === 0) {
+    const p = document.createElement('p');
+    p.style.cssText = 'font-size:13px;color:var(--text2);margin-bottom:12px;';
+    p.textContent = 'Belum ada Gemini API key. Dapatkan di aistudio.google.com';
+    container.appendChild(p);
+  }
+  settings.geminiKeys.forEach((key, idx) => {
+    const row = document.createElement('div');
+    row.className = 'setting-row';
+    const label = document.createElement('span');
+    label.style.cssText = 'font-size:12px;color:var(--text2);min-width:24px;';
+    label.textContent = `#${idx+1}`;
+    const input = document.createElement('input');
+    input.className = 'setting-input';
+    input.type = 'password';
+    input.value = key;
+    input.placeholder = 'AIza...';
+    input.addEventListener('input', () => { settings.geminiKeys[idx] = input.value; });
+    const delBtn = document.createElement('button');
+    delBtn.className = 'btn btn-danger';
+    delBtn.textContent = '✕';
+    delBtn.addEventListener('click', () => removeGeminiKey(idx));
+    row.appendChild(label); row.appendChild(input); row.appendChild(delBtn);
+    container.appendChild(row);
+  });
+}
+
+function addGeminiKey() {
+  settings.geminiKeys.push('');
+  renderGeminiKeys();
+}
+
+function removeGeminiKey(idx) {
+  settings.geminiKeys.splice(idx, 1);
+  renderGeminiKeys();
+}
+
+// =============================================
+// GEMINI MODELS
+// =============================================
+function renderGeminiModels() {
+  const container = document.getElementById('gemini-models-list');
+  if (!container) return;
+  container.innerHTML = '';
+  if (settings.geminiModels.length === 0) {
+    const p = document.createElement('p');
+    p.style.cssText = 'font-size:13px;color:var(--text2);margin-bottom:12px;';
+    p.textContent = 'Belum ada model Gemini.';
+    container.appendChild(p);
+  }
+  settings.geminiModels.forEach((model, idx) => {
+    const row = document.createElement('div');
+    row.className = 'setting-row';
+    const label = document.createElement('span');
+    label.style.cssText = 'font-size:12px;color:var(--text2);min-width:24px;';
+    label.textContent = `#${idx+1}`;
+    const input = document.createElement('input');
+    input.className = 'setting-input';
+    input.type = 'text';
+    input.value = model;
+    input.placeholder = 'gemini-2.0-flash';
+    input.addEventListener('input', () => { settings.geminiModels[idx] = input.value; });
+    const delBtn = document.createElement('button');
+    delBtn.className = 'btn btn-danger';
+    delBtn.textContent = '✕';
+    delBtn.addEventListener('click', () => removeGeminiModel(idx));
+    row.appendChild(label); row.appendChild(input); row.appendChild(delBtn);
+    container.appendChild(row);
+  });
+}
+
+function addGeminiModel() {
+  settings.geminiModels.push('');
+  renderGeminiModels();
+}
+
+function removeGeminiModel(idx) {
+  settings.geminiModels.splice(idx, 1);
+  renderGeminiModels();
+}
+
+function addDefaultGeminiModels() {
+  settings.geminiModels = [...DEFAULT_GEMINI_MODELS];
+  renderGeminiModels();
 }
 
 // =============================================
@@ -1299,8 +1530,21 @@ function playDoneSound() {
 async function startProcessing() {
   // Validate
   if (files.length === 0) { showAlert('Upload gambar terlebih dahulu!', 'error'); return; }
-  if (settings.apiKeys.filter(k => k.trim()).length === 0) { showAlert('Tambahkan minimal 1 API Key di Settings!', 'error'); return; }
-  if (settings.models.filter(m => m.trim()).length === 0) { showAlert('Tambahkan minimal 1 Model di Settings!', 'error'); return; }
+  const useOR = settings.providers.openrouter;
+  const useGemini = settings.providers.gemini;
+  if (!useOR && !useGemini) { showAlert('Aktifkan minimal 1 provider di Settings!', 'error'); return; }
+  if (useOR && settings.apiKeys.filter(k => k.trim()).length === 0 && !useGemini) {
+    showAlert('Tambahkan minimal 1 API Key OpenRouter di Settings!', 'error'); return;
+  }
+  if (useGemini && settings.geminiKeys.filter(k => k.trim()).length === 0 && !useOR) {
+    showAlert('Tambahkan minimal 1 API Key Gemini di Settings!', 'error'); return;
+  }
+  if (useOR && settings.models.filter(m => m.trim()).length === 0 && !useGemini) {
+    showAlert('Tambahkan minimal 1 Model OpenRouter di Settings!', 'error'); return;
+  }
+  if (useGemini && settings.geminiModels.filter(m => m.trim()).length === 0 && !useOR) {
+    showAlert('Tambahkan minimal 1 Model Gemini di Settings!', 'error'); return;
+  }
 
   isProcessing = true;
   stopRequested = false;
@@ -1701,104 +1945,109 @@ Rules:
 - Category: single number that best matches the image
 - Output ONLY the JSON, nothing else`;
 
-  const validKeys = settings.apiKeys.filter(k => k.trim());
-  const validModels = settings.models.filter(m => m.trim());
+  const validORKeys = settings.providers.openrouter ? settings.apiKeys.filter(k => k.trim()) : [];
+  const validORModels = settings.providers.openrouter ? settings.models.filter(m => m.trim()) : [];
+  const validGeminiKeys = settings.providers.gemini ? settings.geminiKeys.filter(k => k.trim()) : [];
+  const validGeminiModels = settings.providers.gemini ? settings.geminiModels.filter(m => m.trim()) : [];
 
-  // Retry delays: 15s, 30s, 60s, 90s, 120s
   const RETRY_DELAYS = [15000, 30000, 60000, 90000, 120000];
   const MAX_RETRIES = RETRY_DELAYS.length;
-
   let attempt = 0;
+
+  // Build key groups: [{type, key, models}]
+  const buildKeyGroups = () => {
+    const groups = [];
+    validORKeys.forEach(key => { if (validORModels.length > 0) groups.push({ type: 'openrouter', key, models: validORModels }); });
+    validGeminiKeys.forEach(key => { if (validGeminiModels.length > 0) groups.push({ type: 'gemini', key, models: validGeminiModels }); });
+    return groups;
+  };
+
+  const keyGroups = buildKeyGroups();
+  if (keyGroups.length === 0) throw new Error('Tidak ada API key atau model yang dikonfigurasi');
+
+  const bothActive = settings.providers.openrouter && settings.providers.gemini;
 
   while (attempt <= MAX_RETRIES) {
     if (stopRequested) throw new Error('Dihentikan oleh pengguna');
 
     let lastError = null;
-    let allRateLimited = true; // track if ALL failures are rate limit
+    let allRateLimited = true;
 
-    // Try each API key one by one
-    for (const apiKey of validKeys) {
-      if (stopRequested) throw new Error('Dihentikan oleh pengguna');
-
-      // Race: panggil semua model bersamaan, tercepat yang menang
-      const controllers = validModels.map(() => new AbortController());
-      const keyIdx = validKeys.indexOf(apiKey) + 1;
-
-      const modelRaces = validModels.map((model, idx) =>
-        callOpenRouter(apiKey.trim(), model.trim(), prompt, base64, controllers[idx].signal)
-          .then(result => ({ result, model }))
+    if (bothActive) {
+      // Race SEMUA provider + key + model bersamaan
+      const controllers = keyGroups.flatMap(g => g.models.map(() => new AbortController()));
+      let ci = 0;
+      const allRaces = keyGroups.flatMap(g =>
+        g.models.map(model => {
+          const ctrl = controllers[ci++];
+          const call = g.type === 'gemini'
+            ? callGemini(g.key, model, prompt, base64, ctrl.signal)
+            : callOpenRouter(g.key, model, prompt, base64, ctrl.signal);
+          return call.then(result => ({ result, model, type: g.type }));
+        })
       );
-
-      if (attempt === 0) {
-        addLog('info', `  Race ${validModels.length} model (Key #${keyIdx})...`);
-      } else {
-        addLog('info', `  Retry ke-${attempt}: Race ${validModels.length} model (Key #${keyIdx})...`);
-      }
-
+      const label = `OR(${validORKeys.length}×${validORModels.length}) + Gemini(${validGeminiKeys.length}×${validGeminiModels.length})`;
+      addLog('info', `  Race semua provider: ${label} (attempt ${attempt+1})...`);
       try {
-        const winner = await Promise.any(modelRaces);
-
-        // Cancel semua model lain yang masih berjalan
-        controllers.forEach((ctrl, idx) => {
-          if (validModels[idx] !== winner.model) {
-            try { ctrl.abort(); } catch(e) {}
-          }
-        });
-
-        addLog('success', `  ✓ Menang: ${winner.model.split('/').pop()}`);
+        const winner = await Promise.any(allRaces);
+        controllers.forEach(c => { try { c.abort(); } catch(e) {} });
+        addLog('success', `  ✓ ${winner.type} — ${winner.model.split('/').pop()}`);
         return winner.result;
-
       } catch(err) {
-        // Cancel all for this key
-        controllers.forEach(ctrl => { try { ctrl.abort(); } catch(e) {} });
-
-        // Extract error from AggregateError
+        controllers.forEach(c => { try { c.abort(); } catch(e) {} });
         let errMsg = err.message;
-        if (err.errors && err.errors.length > 0) {
-          errMsg = err.errors[err.errors.length - 1].message || errMsg;
-        }
-
+        if (err.errors?.length > 0) errMsg = err.errors[err.errors.length-1].message || errMsg;
         lastError = new Error(errMsg);
-
-        // Check if this is a rate limit error
-        const isRateLimit = errMsg.toLowerCase().includes('rate limit') ||
-                           errMsg.toLowerCase().includes('too many') ||
-                           errMsg.toLowerCase().includes('429');
-
-        if (!isRateLimit) allRateLimited = false;
-
-        addLog('warn', `  ✗ Key #${keyIdx} gagal: ${errMsg}`);
-        await sleep(300);
+        const isRL = errMsg.toLowerCase().includes('rate limit') || errMsg.toLowerCase().includes('too many') || errMsg.includes('429');
+        if (!isRL) allRateLimited = false;
+        addLog('warn', `  ✗ Semua gagal: ${errMsg}`);
+      }
+    } else {
+      // Sequential per key group
+      for (const group of keyGroups) {
+        if (stopRequested) throw new Error('Dihentikan oleh pengguna');
+        const controllers = group.models.map(() => new AbortController());
+        const keyLabel = `${group.type === 'gemini' ? 'Gemini' : 'OR'} Key #${keyGroups.indexOf(group)+1}`;
+        addLog('info', `  Race ${group.models.length} model (${keyLabel}, attempt ${attempt+1})...`);
+        const races = group.models.map((model, idx) => {
+          const call = group.type === 'gemini'
+            ? callGemini(group.key, model, prompt, base64, controllers[idx].signal)
+            : callOpenRouter(group.key, model, prompt, base64, controllers[idx].signal);
+          return call.then(result => ({ result, model, type: group.type }));
+        });
+        try {
+          const winner = await Promise.any(races);
+          controllers.forEach(c => { try { c.abort(); } catch(e) {} });
+          addLog('success', `  ✓ ${winner.model.split('/').pop()}`);
+          return winner.result;
+        } catch(err) {
+          controllers.forEach(c => { try { c.abort(); } catch(e) {} });
+          let errMsg = err.message;
+          if (err.errors?.length > 0) errMsg = err.errors[err.errors.length-1].message || errMsg;
+          lastError = new Error(errMsg);
+          const isRL = errMsg.toLowerCase().includes('rate limit') || errMsg.toLowerCase().includes('too many') || errMsg.includes('429');
+          if (!isRL) allRateLimited = false;
+          addLog('warn', `  ✗ ${keyLabel} gagal: ${errMsg}`);
+          await sleep(300);
+        }
       }
     }
 
-    // All keys failed — decide whether to retry or give up
+    // All failed — retry with backoff
     if (attempt < MAX_RETRIES) {
       const delay = RETRY_DELAYS[attempt];
-      const delaySec = delay / 1000;
-
-      if (allRateLimited) {
-        addLog('warn', `  ⏳ Rate limit — tunggu ${delaySec} detik lalu retry otomatis...`);
-      } else {
-        addLog('warn', `  ⏳ Semua gagal — tunggu ${delaySec} detik lalu retry...`);
-      }
-
-      // Countdown log every 15 seconds
+      addLog('warn', `  ⏳ ${allRateLimited ? 'Rate limit' : 'Semua gagal'} — tunggu ${delay/1000} detik...`);
       let waited = 0;
       while (waited < delay) {
         if (stopRequested) throw new Error('Dihentikan oleh pengguna');
-        const waitChunk = Math.min(15000, delay - waited);
-        await sleep(waitChunk);
-        waited += waitChunk;
-        if (waited < delay) {
-          addLog('info', `  ⏳ Sisa tunggu: ${Math.round((delay - waited) / 1000)} detik...`);
-        }
+        const chunk = Math.min(15000, delay - waited);
+        await sleep(chunk);
+        waited += chunk;
+        if (waited < delay) addLog('info', `  ⏳ Sisa: ${Math.round((delay-waited)/1000)} detik...`);
       }
-
       attempt++;
     } else {
-      // Exceeded max retries
-      throw new Error(`Gagal setelah ${MAX_RETRIES} retry. Error terakhir: ${lastError ? lastError.message : 'Unknown'}`);
+      throw new Error(`Gagal setelah ${MAX_RETRIES} retry. Error: ${lastError ? lastError.message : 'Unknown'}`);
     }
   }
 
@@ -1867,6 +2116,55 @@ function anySignal(signals) {
     signal.addEventListener('abort', () => controller.abort(), { once: true });
   }
   return controller.signal;
+}
+
+// =============================================
+// GEMINI API CALL
+// =============================================
+async function callGemini(apiKey, model, prompt, base64, externalSignal) {
+  const timeoutController = new AbortController();
+  const timeoutId = setTimeout(() => timeoutController.abort(), 30000);
+  const signal = externalSignal
+    ? anySignal([externalSignal, timeoutController.signal])
+    : timeoutController.signal;
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            { inline_data: { mime_type: 'image/jpeg', data: base64 } },
+            { text: prompt }
+          ]
+        }],
+        generationConfig: { maxOutputTokens: 1000, temperature: 0.4 }
+      }),
+      signal
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      const errMsg = errData?.error?.message || `HTTP ${response.status}`;
+      throw new Error(errMsg);
+    }
+
+    const data = await response.json();
+    const content = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!content) throw new Error('Empty response from Gemini API');
+
+    return parseMetadata(content);
+
+  } catch(err) {
+    clearTimeout(timeoutId);
+    if (err.name === 'AbortError') throw new Error('Timeout atau dibatalkan');
+    throw err;
+  }
 }
 
 function parseMetadata(raw) {
