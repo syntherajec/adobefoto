@@ -709,6 +709,36 @@
       </div>
     </div>
 
+    <!-- TIMEOUT -->
+    <div class="section-title">⏱️ Timeout per Request</div>
+    <div class="card">
+      <p style="font-size:13px; color:var(--text2); margin-bottom:16px;">Batas waktu tunggu per request API. Jika dimatikan, tunggu sampai server menjawab.</p>
+      <div class="flex gap-10" style="align-items:center; margin-bottom:14px;">
+        <button class="upscale-btn" id="timeout-btn-on" onclick="setTimeoutMode(true)">Aktif</button>
+        <button class="upscale-btn" id="timeout-btn-off" onclick="setTimeoutMode(false)">Mati</button>
+      </div>
+      <div id="timeout-input-section" style="display:flex; align-items:center; gap:12px;">
+        <input type="number" id="timeout-seconds-input" class="setting-input" style="max-width:120px;"
+          min="10" max="300" placeholder="60"
+          oninput="settings.timeoutSeconds = Math.max(10, parseInt(this.value)||60)">
+        <span style="font-size:13px; color:var(--text2);">detik (min 10, maks 300)</span>
+      </div>
+      <p class="mt-10" style="font-size:12px; color:var(--text2);" id="timeout-info"></p>
+    </div>
+
+    <!-- MAX RACE MODELS -->
+    <div class="section-title">🏁 Jumlah Model Race Bersamaan</div>
+    <div class="card">
+      <p style="font-size:13px; color:var(--text2); margin-bottom:16px;">Berapa model yang dipanggil bersamaan per API key. Lebih sedikit = koneksi lebih stabil, lebih jarang timeout.</p>
+      <div class="flex gap-10" style="align-items:center;">
+        <button class="upscale-btn" id="race-btn-1" onclick="setMaxRace(1)">1</button>
+        <button class="upscale-btn" id="race-btn-2" onclick="setMaxRace(2)">2</button>
+        <button class="upscale-btn" id="race-btn-3" onclick="setMaxRace(3)">3</button>
+        <button class="upscale-btn" id="race-btn-5" onclick="setMaxRace(5)">Semua</button>
+      </div>
+      <p class="mt-10" style="font-size:12px; color:var(--text2);" id="race-info"></p>
+    </div>
+
     <!-- UPSCALE -->
     <div class="section-title">📐 Upscale Size</div>
     <div class="card">
@@ -928,7 +958,10 @@ let settings = {
   geminiKeys: [],
   geminiModels: [],
   providers: { openrouter: true, gemini: false },
-  upscale: 4
+  upscale: 4,
+  timeoutEnabled: true,
+  timeoutSeconds: 60,
+  maxRaceModels: 2
 };
 
 let files = [];
@@ -973,8 +1006,55 @@ function init() {
   renderModels();
   renderGeminiKeys();
   renderGeminiModels();
+  renderTimeoutSettings();
+  renderRaceSettings();
   renderUpscale();
   setupDragDrop();
+}
+
+// =============================================
+// TIMEOUT SETTINGS
+// =============================================
+function renderTimeoutSettings() {
+  const btnOn = document.getElementById('timeout-btn-on');
+  const btnOff = document.getElementById('timeout-btn-off');
+  const inputSection = document.getElementById('timeout-input-section');
+  const input = document.getElementById('timeout-seconds-input');
+  const info = document.getElementById('timeout-info');
+
+  if (!btnOn) return;
+  btnOn.classList.toggle('selected', settings.timeoutEnabled);
+  btnOff.classList.toggle('selected', !settings.timeoutEnabled);
+  inputSection.style.display = settings.timeoutEnabled ? 'flex' : 'none';
+  if (input) input.value = settings.timeoutSeconds;
+  if (info) {
+    info.textContent = settings.timeoutEnabled
+      ? `Setiap request akan dibatalkan jika tidak ada respon dalam ${settings.timeoutSeconds} detik`
+      : 'Tidak ada batas waktu — tunggu sampai server menjawab';
+  }
+}
+
+function setTimeoutMode(enabled) {
+  settings.timeoutEnabled = enabled;
+  renderTimeoutSettings();
+}
+
+// =============================================
+// MAX RACE MODELS SETTINGS
+// =============================================
+function renderRaceSettings() {
+  const info = document.getElementById('race-info');
+  [1,2,3,5].forEach(v => {
+    const btn = document.getElementById('race-btn-' + v);
+    if (btn) btn.classList.toggle('selected', settings.maxRaceModels === v);
+  });
+  if (info) {
+    const label = settings.maxRaceModels === 5 ? 'Semua model dipanggil bersamaan' : `${settings.maxRaceModels} model dipanggil bersamaan per key`;
+    info.textContent = label + (settings.maxRaceModels === 1 ? ' — paling stabil, tidak membebani koneksi' :
+      settings.maxRaceModels === 2 ? ' — keseimbangan kecepatan & stabilitas (direkomendasikan)' :
+      settings.maxRaceModels === 3 ? ' — lebih cepat, koneksi sedikit terbebani' :
+      ' — tercepat, koneksi paling terbebani');
+  }
 }
 
 function loadSettings() {
@@ -991,10 +1071,16 @@ function loadSettings() {
         openrouter: parsed.providers?.openrouter !== false,
         gemini: parsed.providers?.gemini === true
       };
+      settings.timeoutEnabled = parsed.timeoutEnabled !== false;
+      settings.timeoutSeconds = (typeof parsed.timeoutSeconds === 'number' && parsed.timeoutSeconds >= 10) ? parsed.timeoutSeconds : 60;
+      settings.maxRaceModels = (typeof parsed.maxRaceModels === 'number' && parsed.maxRaceModels >= 1) ? parsed.maxRaceModels : 2;
     } else {
       settings.models = [...DEFAULT_MODELS];
       settings.geminiModels = [...DEFAULT_GEMINI_MODELS];
       settings.providers = { openrouter: true, gemini: false };
+      settings.timeoutEnabled = true;
+      settings.timeoutSeconds = 60;
+      settings.maxRaceModels = 2;
     }
   } catch(e) {
     console.error('Load settings error:', e);
@@ -1002,7 +1088,7 @@ function loadSettings() {
       apiKeys: [], models: [...DEFAULT_MODELS],
       geminiKeys: [], geminiModels: [...DEFAULT_GEMINI_MODELS],
       providers: { openrouter: true, gemini: false },
-      upscale: 4
+      upscale: 4, timeoutEnabled: true, timeoutSeconds: 60, maxRaceModels: 2
     };
   }
 }
@@ -1139,6 +1225,11 @@ function removeModel(idx) {
 function addDefaultModels() {
   settings.models = [...DEFAULT_MODELS];
   renderModels();
+}
+
+function setMaxRace(val) {
+  settings.maxRaceModels = val;
+  renderRaceSettings();
 }
 
 // =============================================
@@ -2183,8 +2274,9 @@ async function enhanceImage(blob) {
 
 // =============================================
 // STEP 4: METADATA GENERATOR
-// Race: semua model dipanggil bersamaan per API key
-// Auto retry dengan exponential backoff jika rate limit
+// Batch race: per key, panggil N model bersamaan
+// Jika batch gagal → coba batch berikutnya (model selanjutnya)
+// Setelah semua model semua key habis → baru retry dengan backoff
 // =============================================
 async function generateMetadata(blob, filename) {
   const base64 = await blobToBase64Compressed(blob, 1536);
@@ -2194,7 +2286,7 @@ async function generateMetadata(blob, filename) {
 Respond ONLY with a valid JSON object, no markdown, no explanation, exactly this format:
 {
   "title": "Short descriptive title of the image (max 200 characters, in English)",
-  "keywords": "keyword1, keyword2, keyword3, ... (max 49 keywords, comma-separated, ordered by relevance, in English)",
+  "keywords": "keyword1, keyword2, keyword3, keyword4, ... (comma-separated, in English)",
   "category": 11
 }
 
@@ -2202,103 +2294,115 @@ Category must be a NUMBER from this list:
 1=Animals, 2=Buildings and Architecture, 3=Business, 4=Drinks, 5=The Environment, 6=States of Mind, 7=Food, 8=Graphic Resources, 9=Hobbies and Leisure, 10=Industry, 11=Landscapes, 12=Lifestyle, 13=People, 14=Plants and Flowers, 15=Culture and Religion, 16=Science, 17=Social Issues, 18=Sports, 19=Technology, 20=Transport, 21=Travel
 
 Rules:
-- Title: descriptive, professional, max 200 chars
-- Keywords: max 49, most relevant first, all lowercase, no duplicates
+- Title: descriptive, professional, max 200 chars, minimum 2 words
+- Keywords: TARGET 40-49 keywords (NEVER fewer than 20). Think broadly across: main subject, colors, mood, style, composition, lighting, background, textures, use case, industry, season, location, emotion, concept, artistic style, technical aspects. Most relevant first, all lowercase, no duplicates, max 49 total.
 - Category: single number that best matches the image
-- Output ONLY the JSON, nothing else`;
+- Output ONLY the JSON, nothing else. Never use "..." as a value.`;
 
   const validORKeys = settings.providers.openrouter ? settings.apiKeys.filter(k => k.trim()) : [];
   const validORModels = settings.providers.openrouter ? settings.models.filter(m => m.trim()) : [];
   const validGeminiKeys = settings.providers.gemini ? settings.geminiKeys.filter(k => k.trim()) : [];
   const validGeminiModels = settings.providers.gemini ? settings.geminiModels.filter(m => m.trim()) : [];
 
+  // batchSize: berapa model dipanggil bersamaan
+  // maxRaceModels=5 berarti "Semua" → gunakan semua model sekaligus
+  const batchSize = settings.maxRaceModels === 5 ? Infinity : settings.maxRaceModels;
+
+  // Build semua "slot" percobaan: [{type, key, model}]
+  // Urutan: interleave OR dan Gemini agar kedua provider dicoba lebih merata
+  const buildAllSlots = () => {
+    const orSlots = [];
+    validORKeys.forEach(key => validORModels.forEach(model => orSlots.push({ type: 'openrouter', key, model })));
+    const gemSlots = [];
+    validGeminiKeys.forEach(key => validGeminiModels.forEach(model => gemSlots.push({ type: 'gemini', key, model })));
+
+    // Interleave OR dan Gemini jika keduanya aktif
+    const slots = [];
+    const maxLen = Math.max(orSlots.length, gemSlots.length);
+    for (let i = 0; i < maxLen; i++) {
+      if (i < gemSlots.length) slots.push(gemSlots[i]); // Gemini duluan (lebih pintar)
+      if (i < orSlots.length) slots.push(orSlots[i]);
+    }
+    return slots;
+  };
+
+  const allSlots = buildAllSlots();
+  if (allSlots.length === 0) throw new Error('Tidak ada API key atau model yang dikonfigurasi');
+
   const RETRY_DELAYS = [15000, 30000, 60000, 90000, 120000];
   const MAX_RETRIES = RETRY_DELAYS.length;
   let attempt = 0;
-
-  // Build key groups: [{type, key, models}]
-  const buildKeyGroups = () => {
-    const groups = [];
-    validORKeys.forEach(key => { if (validORModels.length > 0) groups.push({ type: 'openrouter', key, models: validORModels }); });
-    validGeminiKeys.forEach(key => { if (validGeminiModels.length > 0) groups.push({ type: 'gemini', key, models: validGeminiModels }); });
-    return groups;
-  };
-
-  const keyGroups = buildKeyGroups();
-  if (keyGroups.length === 0) throw new Error('Tidak ada API key atau model yang dikonfigurasi');
-
-  const bothActive = settings.providers.openrouter && settings.providers.gemini;
 
   while (attempt <= MAX_RETRIES) {
     if (stopRequested) throw new Error('Dihentikan oleh pengguna');
 
     let lastError = null;
     let allRateLimited = true;
+    let anySuccess = false;
 
-    if (bothActive) {
-      // Race SEMUA provider + key + model bersamaan
-      const controllers = keyGroups.flatMap(g => g.models.map(() => new AbortController()));
-      let ci = 0;
-      const allRaces = keyGroups.flatMap(g =>
-        g.models.map(model => {
-          const ctrl = controllers[ci++];
-          const call = g.type === 'gemini'
-            ? callGemini(g.key, model, prompt, base64, ctrl.signal)
-            : callOpenRouter(g.key, model, prompt, base64, ctrl.signal);
-          return call.then(result => ({ result, model, type: g.type }));
-        })
-      );
-      const label = `OR(${validORKeys.length}×${validORModels.length}) + Gemini(${validGeminiKeys.length}×${validGeminiModels.length})`;
-      addLog('info', `  Race semua provider: ${label} (attempt ${attempt+1})...`);
+    // Proses semua slot dalam batch
+    const effectiveBatch = batchSize === Infinity ? allSlots.length : batchSize;
+
+    for (let i = 0; i < allSlots.length; i += effectiveBatch) {
+      if (stopRequested) throw new Error('Dihentikan oleh pengguna');
+
+      const batch = allSlots.slice(i, i + effectiveBatch);
+      const controllers = batch.map(() => new AbortController());
+
+      // Label batch untuk log
+      const batchLabel = batch.map(s =>
+        `${s.type === 'gemini' ? 'G' : 'OR'}:${s.model.split('/').pop().substring(0, 15)}`
+      ).join(' | ');
+      addLog('info', `  Batch [${Math.floor(i/effectiveBatch)+1}/${Math.ceil(allSlots.length/effectiveBatch)}] attempt ${attempt+1}: ${batchLabel}`);
+
+      const races = batch.map((slot, idx) => {
+        const call = slot.type === 'gemini'
+          ? callGemini(slot.key, slot.model, prompt, base64, controllers[idx].signal)
+          : callOpenRouter(slot.key, slot.model, prompt, base64, controllers[idx].signal);
+        return call.then(result => ({ result, model: slot.model, type: slot.type }));
+      });
+
       try {
-        const winner = await Promise.any(allRaces);
+        const winner = await Promise.any(races);
+        // Cancel sisa yang masih jalan
         controllers.forEach(c => { try { c.abort(); } catch(e) {} });
         addLog('success', `  ✓ ${winner.type} — ${winner.model.split('/').pop()}`);
         return winner.result;
+
       } catch(err) {
         controllers.forEach(c => { try { c.abort(); } catch(e) {} });
+
         let errMsg = err.message;
-        if (err.errors?.length > 0) errMsg = err.errors[err.errors.length-1].message || errMsg;
-        lastError = new Error(errMsg);
-        const isRL = errMsg.toLowerCase().includes('rate limit') || errMsg.toLowerCase().includes('too many') || errMsg.includes('429');
-        if (!isRL) allRateLimited = false;
-        addLog('warn', `  ✗ Semua gagal: ${errMsg}`);
-      }
-    } else {
-      // Sequential per key group
-      for (const group of keyGroups) {
-        if (stopRequested) throw new Error('Dihentikan oleh pengguna');
-        const controllers = group.models.map(() => new AbortController());
-        const keyLabel = `${group.type === 'gemini' ? 'Gemini' : 'OR'} Key #${keyGroups.indexOf(group)+1}`;
-        addLog('info', `  Race ${group.models.length} model (${keyLabel}, attempt ${attempt+1})...`);
-        const races = group.models.map((model, idx) => {
-          const call = group.type === 'gemini'
-            ? callGemini(group.key, model, prompt, base64, controllers[idx].signal)
-            : callOpenRouter(group.key, model, prompt, base64, controllers[idx].signal);
-          return call.then(result => ({ result, model, type: group.type }));
-        });
-        try {
-          const winner = await Promise.any(races);
-          controllers.forEach(c => { try { c.abort(); } catch(e) {} });
-          addLog('success', `  ✓ ${winner.model.split('/').pop()}`);
-          return winner.result;
-        } catch(err) {
-          controllers.forEach(c => { try { c.abort(); } catch(e) {} });
-          let errMsg = err.message;
-          if (err.errors?.length > 0) errMsg = err.errors[err.errors.length-1].message || errMsg;
-          lastError = new Error(errMsg);
-          const isRL = errMsg.toLowerCase().includes('rate limit') || errMsg.toLowerCase().includes('too many') || errMsg.includes('429');
+        if (err.errors?.length > 0) {
+          // Ambil semua error messages untuk analisis
+          const msgs = err.errors.map(e => e.message || '').filter(Boolean);
+          errMsg = msgs[msgs.length - 1] || errMsg;
+          // Cek apakah ada yang bukan rate limit
+          const hasNonRL = msgs.some(m =>
+            !m.toLowerCase().includes('rate limit') &&
+            !m.toLowerCase().includes('too many') &&
+            !m.includes('429') &&
+            !m.toLowerCase().includes('timeout') &&
+            !m.toLowerCase().includes('dibatalkan')
+          );
+          if (hasNonRL) allRateLimited = false;
+        } else {
+          const isRL = errMsg.toLowerCase().includes('rate limit') ||
+                      errMsg.toLowerCase().includes('too many') ||
+                      errMsg.includes('429');
           if (!isRL) allRateLimited = false;
-          addLog('warn', `  ✗ ${keyLabel} gagal: ${errMsg}`);
-          await sleep(300);
         }
+
+        lastError = new Error(errMsg);
+        addLog('warn', `  ✗ Batch gagal: ${errMsg.substring(0, 80)}`);
+        await sleep(200); // jeda kecil antar batch
       }
     }
 
-    // All failed — retry with backoff
+    // Semua batch semua slot sudah dicoba, semuanya gagal
     if (attempt < MAX_RETRIES) {
       const delay = RETRY_DELAYS[attempt];
-      addLog('warn', `  ⏳ ${allRateLimited ? 'Rate limit' : 'Semua gagal'} — tunggu ${delay/1000} detik...`);
+      addLog('warn', `  ⏳ ${allRateLimited ? 'Rate limit' : 'Semua model gagal'} — tunggu ${delay/1000} detik lalu retry ke-${attempt+1}...`);
       let waited = 0;
       while (waited < delay) {
         if (stopRequested) throw new Error('Dihentikan oleh pengguna');
@@ -2309,7 +2413,7 @@ Rules:
       }
       attempt++;
     } else {
-      throw new Error(`Gagal setelah ${MAX_RETRIES} retry. Error: ${lastError ? lastError.message : 'Unknown'}`);
+      throw new Error(`Gagal setelah ${MAX_RETRIES} retry. Error terakhir: ${lastError ? lastError.message : 'Unknown'}`);
     }
   }
 
@@ -2317,11 +2421,11 @@ Rules:
 }
 
 async function callOpenRouter(apiKey, model, prompt, base64, externalSignal) {
-  // Use internal timeout controller combined with external race signal
   const timeoutController = new AbortController();
-  const timeoutId = setTimeout(() => timeoutController.abort(), 30000);
-
-  // Combine external signal (race cancel) + internal timeout
+  let timeoutId = null;
+  if (settings.timeoutEnabled) {
+    timeoutId = setTimeout(() => timeoutController.abort(), settings.timeoutSeconds * 1000);
+  }
   const signal = externalSignal
     ? anySignal([externalSignal, timeoutController.signal])
     : timeoutController.signal;
@@ -2349,7 +2453,7 @@ async function callOpenRouter(apiKey, model, prompt, base64, externalSignal) {
       signal
     });
 
-    clearTimeout(timeoutId);
+    if (timeoutId) clearTimeout(timeoutId);
 
     if (!response.ok) {
       const errData = await response.json().catch(() => ({}));
@@ -2364,7 +2468,7 @@ async function callOpenRouter(apiKey, model, prompt, base64, externalSignal) {
     return parseMetadata(content);
 
   } catch(err) {
-    clearTimeout(timeoutId);
+    if (timeoutId) clearTimeout(timeoutId);
     if (err.name === 'AbortError') throw new Error('Timeout atau dibatalkan');
     throw err;
   }
@@ -2385,7 +2489,10 @@ function anySignal(signals) {
 // =============================================
 async function callGemini(apiKey, model, prompt, base64, externalSignal) {
   const timeoutController = new AbortController();
-  const timeoutId = setTimeout(() => timeoutController.abort(), 30000);
+  let timeoutId = null;
+  if (settings.timeoutEnabled) {
+    timeoutId = setTimeout(() => timeoutController.abort(), settings.timeoutSeconds * 1000);
+  }
   const signal = externalSignal
     ? anySignal([externalSignal, timeoutController.signal])
     : timeoutController.signal;
@@ -2408,7 +2515,7 @@ async function callGemini(apiKey, model, prompt, base64, externalSignal) {
       signal
     });
 
-    clearTimeout(timeoutId);
+    if (timeoutId) clearTimeout(timeoutId);
 
     if (!response.ok) {
       const errData = await response.json().catch(() => ({}));
@@ -2423,7 +2530,7 @@ async function callGemini(apiKey, model, prompt, base64, externalSignal) {
     return parseMetadata(content);
 
   } catch(err) {
-    clearTimeout(timeoutId);
+    if (timeoutId) clearTimeout(timeoutId);
     if (err.name === 'AbortError') throw new Error('Timeout atau dibatalkan');
     throw err;
   }
@@ -2450,9 +2557,21 @@ function parseMetadata(raw) {
   // Validate and sanitize
   let title = String(parsed.title || '').trim();
   if (!title) throw new Error('Empty title in response');
+
+  // Reject placeholder responses
+  const PLACEHOLDERS = ['...', '…', 'n/a', 'tbd', 'placeholder', 'title here', 'your title'];
+  if (PLACEHOLDERS.includes(title.toLowerCase()) || title.replace(/[.\s]/g, '').length === 0) {
+    throw new Error('Placeholder title in response');
+  }
+  if (title.length < 10) throw new Error('Title too short: ' + title);
+  if (title.split(' ').filter(w => w.length > 0).length < 2) throw new Error('Title must have at least 2 words');
   if (title.length > 200) title = title.substring(0, 197) + '...';
 
   let keywordsRaw = String(parsed.keywords || '').trim();
+  // Reject placeholder keywords
+  if (!keywordsRaw || PLACEHOLDERS.includes(keywordsRaw.toLowerCase()) || keywordsRaw.replace(/[.\s,]/g, '').length === 0) {
+    throw new Error('Placeholder keywords in response');
+  }
   let keywords = keywordsRaw.split(',')
     .map(k => k.trim().toLowerCase())
     .filter(k => k.length > 0 && k.length < 50)
